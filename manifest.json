@@ -1,0 +1,10 @@
+{
+  "id": "learning-investment-ledger",
+  "name": "Investment Ledger · 学习与创作投入账本",
+  "version": "0.3.0",
+  "minAppVersion": "1.8.7",
+  "description": "Connect spending to learning, outcomes and reflection. 关联支出、学习、成果与回访。",
+  "author": "fineuralab",
+  "authorUrl": "https://github.com/fineuralab",
+  "isDesktopOnly": true
+}

@@ -1,0 +1,20 @@
+import { mkdir, writeFile, copyFile, realpath } from 'node:fs/promises';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
+
+const root = process.cwd();
+const temporaryRoot = path.join(tmpdir(), 'investment-ledger-tests');
+await mkdir(temporaryRoot, { recursive: true });
+const testRoot = await realpath(temporaryRoot);
+const vault = path.join(testRoot, 'vault');
+const profile = path.join(testRoot, 'profile');
+const plugin = path.join(vault, '.obsidian/plugins/learning-investment-ledger');
+await mkdir(plugin, { recursive: true }); await mkdir(profile, { recursive: true });
+for (const file of ['main.js', 'manifest.json', 'styles.css']) await copyFile(path.join(root, file), path.join(plugin, file));
+await writeFile(path.join(vault, '.obsidian/community-plugins.json'), JSON.stringify(['learning-investment-ledger']));
+await writeFile(path.join(vault, '.obsidian/app.json'), JSON.stringify({ defaultViewMode: 'preview', legacyEditor: false, showUnsupportedFiles: true, alwaysUpdateLinks: true }));
+await writeFile(path.join(vault, '.obsidian/appearance.json'), JSON.stringify({ theme: 'obsidian', accentColor: '#9aa9df' }));
+await writeFile(path.join(vault, '.obsidian/workspace.json'), JSON.stringify({ main: { id: 'main', type: 'split', children: [{ id: 'leaf', type: 'leaf', state: { type: 'learning-investment-ledger', state: {} } }], direction: 'vertical' }, left: { id: 'left', type: 'split', children: [], direction: 'horizontal', width: 240, collapsed: true }, right: { id: 'right', type: 'split', children: [], direction: 'horizontal', width: 240, collapsed: true } }));
+await writeFile(path.join(profile, 'obsidian.json'), JSON.stringify({ vaults: { '1111111111111111': { path: vault, ts: Date.now(), open: true } } }));
+await writeFile(path.join(vault, '验收笔记.md'), '# 验收笔记\n\n这是独立测试库中的项目与成果笔记。');
+console.log(JSON.stringify({ vault, profile, plugin }));

@@ -1,0 +1,37 @@
+{
+  "name": "learning-investment-ledger",
+  "version": "0.3.0",
+  "private": true,
+  "author": "fineuralab",
+  "description": "An Obsidian ledger connecting learning and creative spending with practice, outcomes, and reflection.",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && node esbuild.config.mjs",
+    "test": "node --import tsx --test tests/*.test.ts && python3 -B -m unittest discover -s tests -p release_test.py",
+    "package": "npm run build && node scripts/package.mjs",
+    "demo": "node --import tsx scripts/demo.ts",
+    "audit:release": "node scripts/package.mjs --audit-only"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "esbuild": "^0.25.11",
+    "obsidian": "^1.8.7",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fineuralab/obsidian-learning-investment-ledger.git"
+  },
+  "homepage": "https://github.com/fineuralab/obsidian-learning-investment-ledger",
+  "bugs": {
+    "url": "https://github.com/fineuralab/obsidian-learning-investment-ledger/issues"
+  }
+}
