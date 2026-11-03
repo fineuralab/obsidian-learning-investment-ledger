@@ -1,6 +1,6 @@
 import { t } from './i18n';
 import { isMap, isScalar, parseDocument, stringify } from 'yaml';
-import { EVENT_LABELS, LedgerDocument, LedgerError, money, validateDocument, wiki } from './domain';
+import { EVENT_LABELS, LedgerDocument, LedgerError, currencyOf, money, validateDocument, wiki } from './domain';
 import { attachmentMarkdown } from './attachments';
 
 const APPENDIX = '<!-- ledger:appendix -->';
@@ -41,7 +41,7 @@ export function encodeDocument(doc: LedgerDocument): string {
   lines.push('', t("## 投入时间线"), '');
   for (const event of [...doc.events].sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`))) {
     lines.push(`### ${event.date} ${event.time} · ${t(EVENT_LABELS[event.type])} · ${event.title}`, '', `<!-- event:${event.id} -->`);
-    if (event.type === 'expense' || event.type === 'refund') lines.push(t("金额：{0}", money(event.amount)));
+    if (event.type === 'expense' || event.type === 'refund') lines.push(t("金额：{0}", money(event.amount, currencyOf(event))));
     if (event.type === 'refund') lines.push(t("原支出 ID：{0}", event.expenseId));
     if (event.type === 'learning') lines.push(event.content, ...(event.minutes ? [t("时长：{0} 分钟", event.minutes)] : []));
     if (event.type === 'outcome') lines.push(t("成果：{0}", wiki(event.target)), event.content);

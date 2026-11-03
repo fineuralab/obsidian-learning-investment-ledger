@@ -198,7 +198,7 @@
 .ill-summary-log { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 7px 0; }
 .ill-summary-log > .ill-btn.ill-text { font-size: 11px; white-space: normal; text-align: left; }
 .ill-summary-footnote { color: var(--ill-muted); font-size: 10px; margin-top: 20px !important; line-height: 1.8; }
-.ill-issues { margin: 0 32px 16px; padding: 13px 16px; border: 1px solid var(--text-error, #df8585); border-radius: 5px; font-size: 11px; max-height: 180px; overflow: auto; }
+.ill-issues { margin: 0 32px 16px; padding: 13px 16px; border: 1px solid var(--text-error, #df8585); border-radius: 5px; font-size: 11px; max-height: 210px; overflow: auto; }
 .ill-issues p { margin: 7px 0; color: var(--ill-muted); }.ill-issues .ill-text { font-size: 11px; }
 .ill-modal { width: 570px; max-width: calc(100vw - 32px); color: var(--text-normal, #e3e7ee); }
 .ill-modal h2 { font-size: 21px; font-weight: 550; margin: 0 0 18px; }
@@ -265,3 +265,19 @@
   .ill-custom-range { padding-inline: 16px; flex-wrap: wrap; }.ill-custom-range .ill-input { width: 125px; }.ill-breakdown-row { gap: 10px; grid-template-columns: 52px 1fr 100px; }.ill-timeline-end { margin-left: 50px; font-size: 9px; }.ill-issues { margin-inline: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .ill-app *, .ill-modal * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* Per-currency totals remain separate at every width. */
+.ill-currency-total { display: flex; flex-direction: column; gap: 4px; margin: 8px 0 14px; }
+.ill-currency-code { font-size: var(--font-smallest); color: var(--text-muted); letter-spacing: .05em; }
+.ill-currency-total .ill-stat-value { font-size: clamp(20px, 2.4vw, 32px); overflow-wrap: anywhere; }
+.ill-quick-currency { width: 88px; flex: 0 0 auto; }
+.ill-detail-amount { overflow-wrap: anywhere; }
+@container (max-width: 700px) { .ill-quick { flex-wrap: wrap; } .ill-quick-currency { width: 72px; } .ill-quick-title { flex: 1 1 120px; } }
+
+.ill-stat { justify-content: flex-start; }
+.ill-currency-balances { width: 100%; }
+.ill-currency-balances.is-multi { max-height: 210px; overflow: auto; overscroll-behavior: contain; margin: 6px 0; padding-right: 4px; }
+.ill-currency-balances.is-multi .ill-currency-total { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: baseline; gap: 2px 8px; margin: 4px 0 9px; }
+.ill-currency-balances.is-multi .ill-currency-code { grid-column: 1; font-size: 9px; }
+.ill-stat:first-child .ill-currency-balances.is-multi .ill-stat-value { grid-column: 2; font-size: 19px; line-height: 1.25; margin: 0; }
+.ill-currency-balances.is-multi .ill-stat-hint { grid-column: 1 / -1; font-size: 9px; }

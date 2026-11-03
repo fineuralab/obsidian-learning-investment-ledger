@@ -1,6 +1,6 @@
 import { localizedOptions, t } from './i18n';
 import { App, Modal, Notice } from 'obsidian';
-import { addDays, baseEvent, clone, createDocument, decimal, EVENT_LABELS, EventType, Expense, Investment, ITEM_TYPES, LedgerDocument, LedgerError, LedgerEvent, localDate, localTime, money, parseMoney, putEvent, RATINGS, refunded, STATUSES, validateDocument } from './domain';
+import { CURRENCIES, Currency, currencyOf, addDays, baseEvent, clone, createDocument, decimal, EVENT_LABELS, EventType, Expense, Investment, ITEM_TYPES, LedgerDocument, LedgerError, LedgerEvent, localDate, localTime, money, parseMoney, putEvent, RATINGS, refunded, STATUSES, validateDocument } from './domain';
 import { Attachment } from './attachments';
 import { AttachmentEditor } from './attachment-ui';
 import { FilePicker } from './files';
@@ -80,7 +80,7 @@ export class InvestmentModal extends SaveModal {
     }, this.original ? t("保存修改") : t("创建投入项"));
   }
 }
-export interface EventSeed { amount?: string; title?: string; notes?: string[]; expenseId?: string }
+export interface EventSeed { amount?: string; title?: string; notes?: string[]; expenseId?: string; currency?: Currency }
 export class EventModal extends SaveModal {
   constructor(private ctx: FormContext, private kind: EventType, private originalDoc?: LedgerDocument, private originalEvent?: LedgerEvent, private seed: EventSeed = {}) { super(ctx.app); }
   onOpen(): void {
@@ -99,9 +99,23 @@ export class EventModal extends SaveModal {
     const title = input(this.form, this.kind === 'expense' || this.kind === 'refund' ? t("用途 *") : this.kind === 'outcome' ? t("成果名称 *") : t("标题 *"), event?.title || this.seed.title || (this.kind === 'review' ? t("投入回访") : ''), 'text', t("这一笔记录是什么？")); title.required = true;
     const dateRow = el(this.form, 'div', 'ill-form-row'); const date = input(dateRow, t("发生日期 *"), event?.date || localDate(), 'date'); date.required = true;
     const time = input(dateRow, t("时间 *"), event?.time || localTime(), 'time'); time.required = true;
-    let amount: HTMLInputElement | undefined; let originalExpense: HTMLSelectElement | undefined;
-    if (this.kind === 'expense' || this.kind === 'refund') { amount = input(this.form, t("金额（元）*"), event && (event.type === 'expense' || event.type === 'refund') ? decimal(event.amount) : this.seed.amount || '', 'text', '0.00'); amount.inputMode = 'decimal'; amount.required = true; }
+    let currency: HTMLSelectElement | undefined; let amount: HTMLInputElement | undefined; let originalExpense: HTMLSelectElement | undefined;
+    if (this.kind === 'expense' || this.kind === 'refund') { amount = input(this.form, t("金额 *"), event && (event.type === 'expense' || event.type === 'refund') ? decimal(event.amount, currencyOf(event)) : this.seed.amount || '', 'text', '0.00'); amount.inputMode = 'decimal'; amount.required = true; }
+    if (amount) {
+      currency = select(this.form, t("币种 *"), CURRENCIES, event && (event.type === 'expense' || event.type === 'refund') ? currencyOf(event) : this.seed.currency || 'CNY');
+      const placeholder = (): void => { amount!.placeholder = decimal(0, currency!.value as Currency); };
+      currency.addEventListener('change', placeholder); placeholder();
+      if (event?.type === 'expense' && this.originalDoc?.events.some(e => e.type === 'refund' && e.expenseId === event.id)) { currency.disabled = true; el(this.form, 'p', 'ill-hint', t("已有退款的支出不能更改币种。")); }
+      el(this.form, 'p', 'ill-hint', t("切换币种不会换算金额；请确认原币数值。"));
+    }
     if (this.kind === 'refund') originalExpense = select(this.form, t("原支出 *"), [], event?.type === 'refund' ? event.expenseId : '');
+    const syncRefundCurrency = (): void => {
+      const selected = docs.find(doc => doc.item.id === itemSelect.value);
+      const expense = selected?.events.find(e => e.id === originalExpense?.value && e.type === 'expense');
+      if (currency && this.kind === 'refund') { currency.value = expense?.type === 'expense' ? currencyOf(expense) : 'CNY'; currency.disabled = true; amount!.placeholder = decimal(0, currency.value as Currency); }
+    };
+    originalExpense?.addEventListener('change', syncRefundCurrency);
+    if (this.kind === 'refund') el(this.form, 'p', 'ill-hint', t("退款币种跟随原支出。"));
     let content: HTMLTextAreaElement | undefined; let minutes: HTMLInputElement | undefined; let target: LinkEditor | undefined;
     if (this.kind === 'learning') {
       content = textarea(this.form, t("本次做了什么？*"), event?.type === 'learning' ? event.content : '', t("记下练习、使用过程和遇到的问题。")); content.required = true;
@@ -135,8 +149,9 @@ export class EventModal extends SaveModal {
       if (originalExpense) {
         const previous = originalExpense.value || (event?.type === 'refund' ? event.expenseId : this.seed.expenseId || '');
         const expenses = selected?.events.filter((e): e is Expense => e.type === 'expense') || [];
-        fillOptions(originalExpense, expenses.map(e => [e.id, t("{0} · {1}（可退 {2}）", e.date, e.title, money(e.amount - refunded(selected!, e.id, event?.id)))]), previous);
+        fillOptions(originalExpense, expenses.map(e => [e.id, t("{0} · {1}（可退 {2}）", e.date, e.title, money(e.amount - refunded(selected!, e.id, event?.id), currencyOf(e)))]), previous);
       }
+      syncRefundCurrency();
       if (expectation && !editing) expectation.value = selected?.item.reason || '';
     };
     itemSelect.addEventListener('change', updateSelection); updateSelection();
@@ -147,8 +162,8 @@ export class EventModal extends SaveModal {
       const base = { ...baseEvent(doc.item.id, title.value, date.value), ...(event ? { id: event.id, createdAt: event.createdAt } : {}), time: time.value, notes: notes.values, attachments: attachments.values };
       let next: LedgerEvent;
       switch (this.kind) {
-        case 'expense': next = { ...base, type: 'expense', amount: parseMoney(amount!.value) }; break;
-        case 'refund': next = { ...base, type: 'refund', amount: parseMoney(amount!.value), expenseId: originalExpense!.value }; break;
+        case 'expense': next = { ...base, type: 'expense', amount: parseMoney(amount!.value, currency!.value as Currency), currency: currency!.value as Currency }; break;
+        case 'refund': next = { ...base, type: 'refund', amount: parseMoney(amount!.value, currency!.value as Currency), currency: currency!.value as Currency, expenseId: originalExpense!.value }; break;
         case 'learning': next = { ...base, type: 'learning', content: content!.value.trim(), minutes: minutes!.value ? Number(minutes!.value) : null }; break;
         case 'outcome': next = { ...base, type: 'outcome', target: target!.values[0] || '', content: content!.value.trim() }; break;
         case 'review': next = { ...base, type: 'review', expectation: expectation!.value.trim(), usage: usage!.value.trim(), outcomes: outcomes!.value.trim(), rating: rating!.value as '达到', plan: plan!.value.trim(), nextReview: nextReview!.value || null }; break;

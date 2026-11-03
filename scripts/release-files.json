@@ -94,6 +94,7 @@
     "src/ui.ts",
     "src/view.ts",
     "styles.css",
+    "tests/currency.test.ts",
     "tests/i18n.test.ts",
     "tests/ledger.test.ts",
     "tests/release_test.py",

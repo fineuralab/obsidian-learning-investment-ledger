@@ -4,7 +4,7 @@
 
 An Obsidian plugin that connects spending on courses, books, tools and creative projects to learning notes, practice, outcomes and follow-up reviews. Follow an investment from its first purchase to what you actually made or learned.
 
-Version **0.3.0 — early preview**. Requires **Obsidian 1.8.7+ on desktop**. Supports English and Simplified Chinese. Currency: **CNY only**. See the [release notes](RELEASE-NOTES.md) for preview scope and feedback instructions.
+Version **0.4.0 — early preview**. Requires **Obsidian 1.8.7+ on desktop**. Supports English and Simplified Chinese. Choose the original currency per expense; totals are grouped by currency without conversion. See the [release notes](RELEASE-NOTES.md) for preview scope and feedback instructions.
 
 Maintained by [fineuralab](https://github.com/fineuralab). MIT licensed.
 
@@ -20,7 +20,7 @@ Commands, forms, attachment controls, messages, summaries, CSV headers and gener
 
 ## Install
 
-Use `learning-investment-ledger-0.3.0.zip` from the [Releases page](https://github.com/fineuralab/obsidian-learning-investment-ledger/releases) when published, or build it using [Build from source](#build-from-source). GitHub's **Code → Download ZIP** contains source files and requires a build before installation.
+Use `learning-investment-ledger-0.4.0.zip` from the [Releases page](https://github.com/fineuralab/obsidian-learning-investment-ledger/releases) when published, or build it using [Build from source](#build-from-source). GitHub's **Code → Download ZIP** contains source files and requires a build before installation.
 
 1. Unzip the archive.
 2. Copy its `learning-investment-ledger` folder into `<your-vault>/.obsidian/plugins/`.
@@ -81,6 +81,18 @@ Imports are limited to 50 MB per file. For larger files, place them in the vault
 
 Attachments do not count as confirmed outcomes. They appear in source Markdown, review notes and the CSV attachment column. Existing 0.1 and 0.2 records remain compatible without migration.
 
+## Per-transaction currencies
+
+Choose a currency in **Quick entry** or the expense form. Supported codes: CNY, USD, EUR, GBP, JPY, HKD, TWD, KRW, SGD, AUD, CAD, NZD, CHF, INR, MYR, THB, KWD and BHD. A single investment can contain payments in different currencies. Changing the selection does not convert the entered number.
+
+Period totals, category charts, investment details and Markdown reviews show each currency separately. There is no combined monetary total or automatic exchange rate. Large totals retain every minor unit, including above JavaScript's safe integer range. Linked projects, outcomes and reviews due retain their existing counting rules. CSV exports include a **Currency** column and original-currency numeric amounts.
+
+Refunds always use the original expense's currency. An expense with linked refunds cannot change currency. Full and partial refund limits are checked in the original minor units.
+
+Existing records without a `currency` field remain CNY with unchanged amounts and IDs; simply opening or switching language does not rewrite files. Files that first receive a foreign-currency transaction upgrade to `schema: 2` and require plugin 0.4.0 or later. Keep a vault backup before updating; older plugin versions will report these new files as unsupported rather than treating foreign amounts as CNY. Existing CNY-only files remain `schema: 1`.
+
+The preview screenshots show the earlier CNY demo; version 0.4.0 adds the per-transaction currency selectors and separate currency totals.
+
 ## Dates, filters and accounting
 
 Choose **This month**, **Last 30 days**, or **Custom dates**, including both start and end dates. Last 30 days means today plus the previous 29 days. The timeline defaults to oldest first and orders same-day events by time; reverse the order when needed.
@@ -91,14 +103,14 @@ Combine event type, investment and keyword filters. Search includes investment n
 
 | Metric | Definition |
 | --- | --- |
-| Net spending | Expenses occurring in the period minus refunds occurring in the period; can be negative |
+| Net spending | Expenses minus refunds in the period, calculated independently for each currency; can be negative |
 | Linked projects | Unique project-note paths attached to investments with events in the period |
 | Linked outcomes | Unique vault-file paths explicitly confirmed by outcome events in the period |
 | Reviews due | All unfinished investments due by today, regardless of the selected period |
 
 Top totals, CSV and review exports always cover the **full selected period**. Additional list filters do not change that scope. Demo and personal ledgers are counted and exported separately.
 
-Amounts are stored as integer fen and displayed with two decimal places. Maximum per transaction: CNY 9,999,999,999.99. Account balances, income, transfers and asset management are outside this plugin's scope.
+Amounts use integer minor units with currency-specific precision: JPY and KRW have no decimal places, CNY and USD have two, and KWD and BHD have three. No rounding or exchange-rate conversion is applied. Account balances, income, transfers and asset management are outside this plugin's scope.
 
 ## Linked notes and recovery
 
@@ -106,7 +118,7 @@ Notes and outcomes open through Obsidian. Native file or folder moves update str
 
 The **Period review** page groups spending by category and lists the related investments, practice, outcome and note links.
 
-- **Export CSV:** save expenses and refunds for the period with UTF-8 BOM, stable IDs, dates, times, categories, purpose, amounts, net impacts, original expense IDs, notes, attachments and demo flags. Amounts use CNY units.
+- **Export CSV:** save expenses and refunds for the period with UTF-8 BOM, stable IDs, dates, times, categories, purpose, amounts, net impacts, original expense IDs, notes, attachments and demo flags. Each row includes its currency code and amounts in that original currency, using its own precision.
 - **Create review:** write your reflection, then save a Markdown note with spending, investments, learning, deduplicated outcomes, reviews due and review history.
 
 Exports go into the ledger's `复盘/` subfolder. Names receive a suffix rather than overwriting existing files. CSV text fields are quoted and protected against spreadsheet formula injection; numeric amounts remain numeric.
@@ -162,12 +174,12 @@ Generated `main.js`, dependencies, `dist/`, test output, editor settings and rea
 
 The package command also prepares a versioned upload folder, bilingual release notes, SHA-256 checksums and a materials ZIP. Downloadable archives exclude hidden files and normalize ZIP dates and host attributes. See [release preparation](PUBLISHING.md).
 
-The 53 automated tests cover accounting, refunds, persistence, stale forms and delete confirmations, YAML recognition, rolling dates, review scheduling, links, attachments, exports, demo isolation and bilingual compatibility. Nine release-boundary checks cover metadata, private values, hidden files, symlinks, nested archives, checksums and matching runtime assets. See [Verification](docs/verification.md) / [验收记录](docs/verification.zh-CN.md) for validation scope and historical native-app checks.
+The 76 automated tests cover accounting, refunds, persistence, stale forms and delete confirmations, YAML recognition, rolling dates, review scheduling, links, attachments, exports, demo isolation and bilingual compatibility. Nine release-boundary checks cover metadata, private values, hidden files, symlinks, nested archives, checksums and matching runtime assets. See [Verification](docs/verification.md) / [验收记录](docs/verification.zh-CN.md) for validation scope and historical native-app checks.
 
 ## Scope and license
 
 Implemented: investments, expenses/refunds, vertical timeline, note links, learning logs, explicitly linked outcomes, reviews, local Markdown persistence, search/filtering, summaries, Markdown reviews, CSV export, attachments and isolated bilingual demos. The UI uses Obsidian theme variables for light and dark themes.
 
-Bill import, OCR, multiple currencies, automatic time tracking, dedicated mobile layouts and external service integrations are deferred.
+Bill import, OCR, automatic exchange-rate conversion, automatic time tracking, dedicated mobile layouts and external service integrations are deferred. Per-transaction currencies and separate currency totals are included in 0.4.0.
 
 MIT license. The bundled YAML parser uses ISC; see [third-party notices](THIRD-PARTY-NOTICES.txt).

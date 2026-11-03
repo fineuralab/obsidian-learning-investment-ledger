@@ -26,16 +26,16 @@ function expense(name = '课程', amount = 29900, date = '2026-11-01'): LedgerDo
 }
 test('acceptance: 299 + 99 + 129 = 527, refund 99 -> 428; edit and delete recalculate', () => {
   const course = expense(); let book = expense('书籍', 9900); const tool = expense('工具', 12900);
-  assert.equal(summarize([course, book, tool], RANGE).net, 52700);
+  assert.equal(summarize([course, book, tool], RANGE).totals[0]!.net, 52700);
   const refund = { ...baseEvent(book.item.id, '退书', '2026-11-02'), time: '11:00', type: 'refund' as const, amount: 9900, expenseId: book.events[0]!.id };
   book = putEvent(book, refund);
-  assert.equal(summarize([course, book, tool], RANGE).net, 42800);
+  assert.equal(summarize([course, book, tool], RANGE).totals[0]!.net, 42800);
   book = putEvent(book, { ...refund, amount: 5000 });
-  assert.equal(summarize([course, book, tool], RANGE).net, 47700);
+  assert.equal(summarize([course, book, tool], RANGE).totals[0]!.net, 47700);
   book = removeEvent(book, refund.id);
-  assert.equal(summarize([course, book, tool], RANGE).net, 52700);
+  assert.equal(summarize([course, book, tool], RANGE).totals[0]!.net, 52700);
   book = removeEvent(book, book.events[0]!.id);
-  assert.equal(summarize([course, book, tool], RANGE).net, 42800);
+  assert.equal(summarize([course, book, tool], RANGE).totals[0]!.net, 42800);
 });
 test('money rejects rounding, invalid values and scientific notation', () => {
   assert.equal(parseMoney('0.29'), 29); assert.equal(parseMoney('299.9'), 29990); assert.equal(parseMoney(' 99.00 '), 9900);
@@ -49,7 +49,7 @@ test('refund cap applies across partial refunds and expense edits, protects refe
   doc = putEvent(doc, refund);
   assert.throws(() => putEvent(doc, { ...refund, id: 'second', amount: 4001 }), /累计退款/);
   doc = putEvent(doc, { ...refund, id: 'second', amount: 4000 });
-  assert.equal(summarize([doc], RANGE).net, 0);
+  assert.equal(summarize([doc], RANGE).totals[0]!.net, 0);
   assert.throws(() => putEvent(doc, { ...original, type: 'expense', amount: 9999 }), /累计退款/);
   assert.throws(() => removeEvent(doc, original.id), /先删除/);
   assert.throws(() => putEvent(doc, { ...refund, expenseId: 'missing' }), /原支出不存在/);
@@ -58,7 +58,7 @@ test('refund cap applies across partial refunds and expense edits, protects refe
 test('cross-period refunds reduce the refund period even when original expense is outside range', () => {
   let doc = expense('书籍', 9900, '2026-10-31');
   doc = putEvent(doc, { ...baseEvent(doc.item.id, '退款', '2026-11-01'), type: 'refund', amount: 9900, expenseId: doc.events[0]!.id });
-  assert.deepEqual([summarize([doc], RANGE).expense, summarize([doc], RANGE).refund, summarize([doc], RANGE).net], [0, 9900, -9900]);
+  assert.deepEqual([summarize([doc], RANGE).totals[0]!.expense, summarize([doc], RANGE).totals[0]!.refund, summarize([doc], RANGE).totals[0]!.net], [0, 9900, -9900]);
 });
 test('timeline includes every event type; actual date/time sorting, combined filters and keyword', () => {
   const { docs } = makeDemo('投入账本', '2026-11-30');
@@ -185,7 +185,7 @@ test('demo install is idempotent and clearing cannot delete real records or unre
 test('safe folder and authoritative validation reject malformed financial data', () => {
   for (const path of ['', '/', '../资料', '.obsidian', 'A/../B', '/absolute/fixture', 'A//B']) assert.throws(() => normalizeFolder(path));
   assert.equal(normalizeFolder(' 学习/投入账本/ '), '学习/投入账本');
-  const doc = expense(); const invalid = clone(doc); (invalid.events[0] as { amount: number }).amount = 0.1; assert.throws(() => validateDocument(invalid), /整数分/);
+  const doc = expense(); const invalid = clone(doc); (invalid.events[0] as { amount: number }).amount = 0.1; assert.throws(() => validateDocument(invalid), /整数最小货币单位/);
 });
 test('attachments are optional for 0.1 records and round-trip on investments and all five event types', () => {
   const { docs } = makeDemo('投入账本', '2026-11-30');
@@ -205,7 +205,7 @@ test('attachments are optional for 0.1 records and round-trip on investments and
     assert.ok(markdown.includes('[在线讲义](<https://example.com/notes.pdf>)'));
   }
   const stats = summarize(docs, { start: '2026-01-01', end: '2026-12-31' });
-  assert.equal(stats.net, 79700); assert.equal(stats.outcomes, 3, 'attachments never count as confirmed outcomes');
+  assert.equal(stats.totals[0]!.net, 79700); assert.equal(stats.outcomes, 3, 'attachments never count as confirmed outcomes');
 });
 test('attachment metadata rejects unsafe URLs, absolute files, traversal and malformed IDs', () => {
   validateAttachments(undefined); validateAttachments([]);
@@ -251,7 +251,7 @@ test('custom filenames load valid YAML comments, quoted keys, tags and flow maps
     const store = new LedgerStore(vault, '投入账本'); await store.load();
     assert.equal(store.issues.length, 0); assert.equal(store.documents.length, 1);
     assert.equal(store.get(doc.item.id)?.events.length, 1); assert.equal(vault.files.get(path), source, 'indexing never rewrites a source');
-    assert.equal(summarize(store.documents, RANGE).net, 29900);
+    assert.equal(summarize(store.documents, RANGE).totals[0]!.net, 29900);
   }
 });
 

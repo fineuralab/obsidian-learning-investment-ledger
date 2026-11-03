@@ -1,4 +1,4 @@
-# 0.3.0 — Early preview
+# 0.4.0 — Early preview
 
 **English** · [简体中文](RELEASE-NOTES.zh-CN.md)
 
@@ -8,7 +8,7 @@ Learning & Creative Investment Ledger connects spending on courses, books, tools
 
 - Obsidian 1.8.7 or later, desktop edition.
 - English and Simplified Chinese; follows Obsidian or uses your selected language.
-- CNY only. Ledger data stays in your vault as readable Markdown.
+- Choose currency per expense; totals stay separate without conversion. Ledger data stays in your vault as readable Markdown.
 
 ## Included
 
@@ -27,7 +27,7 @@ Learning & Creative Investment Ledger connects spending on courses, books, tools
 
 ## Install
 
-1. Download `learning-investment-ledger-0.3.0.zip` from this release.
+1. Download `learning-investment-ledger-0.4.0.zip` from this release.
 2. Unzip it and copy the `learning-investment-ledger` folder into your vault's `.obsidian/plugins/` directory.
 3. Ensure `main.js`, `manifest.json` and `styles.css` are directly inside that folder.
 4. Reload Obsidian and enable **Investment Ledger · 学习与创作投入账本** in Community plugins.
@@ -46,3 +46,14 @@ For feedback, describe the steps, expected behavior, actual behavior and plugin/
 ## Integrity and license
 
 `SHA256SUMS.txt` covers the prepared runtime files, ZIPs and release documents. MIT licensed; the bundled YAML dependency retains its ISC notice. See the included README and third-party notices for details.
+
+## 0.4.0 currencies and compatibility
+
+- Expense forms and quick entry support 18 currencies; refunds use the original expense currency.
+- Integer minor units follow each currency's 0, 2 or 3 decimal places, without automatic rounding.
+- Totals, category charts, investment details, CSV and Markdown reviews retain currencies separately; there is no cross-currency monetary sum.
+- Existing CNY amounts and IDs remain unchanged, without migration or writes on read.
+- Files containing foreign-currency transactions use schema 2 and require plugin 0.4.0 or later. Back up your vault before updating.
+- 76 functional/UI regressions and 9 release-boundary checks cover legacy data, mixed currencies, refund limits, precision, persistence, exports and bilingual interactions.
+
+- Exact integer accumulation now protects large totals, categories and net spending, with regressions for safe-integer boundaries, negative balances, refund cancellation and bilingual rendering.

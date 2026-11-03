@@ -60,7 +60,7 @@ test('language changes preserve schema values, IDs, paths, user text, money and 
     assert.equal(english.split('\n---\n')[0], chinese[index]!.split('\n---\n')[0]);
   }
   assert.deepEqual(docs, original);
-  assert.equal(summarize(docs, range).net, 79700);
+  assert.equal(summarize(docs, range).totals[0]!.net, 79700);
   assert.equal(docs[0]!.item.type, '课程');
   assert.equal(filterEvents(docs, { range, keyword: 'Course', type: 'expense' }).length, 1);
   setLocale('zh-CN');
@@ -76,8 +76,8 @@ test('English exports localize labels and ratings while preserving numeric value
   const csv = exportCsv([doc], range);
   assert.match(csv, /"Record ID","Investment ID","Date"/);
   assert.match(csv, /"Time","Event type","Investments","Category"/);
-  assert.equal(new Set(csv.split('\r\n')[0]!.split(',')).size, 14, 'CSV headings must identify each column unambiguously');
-  assert.match(csv, /"Expense","My course \/ 我的课程","Course","Purchase",299.00,299.00/);
+  assert.equal(new Set(csv.split('\r\n')[0]!.split(',')).size, 15, 'CSV headings must identify each column unambiguously');
+  assert.match(csv, /"Expense","My course \/ 我的课程","Course","Purchase","CNY",299.00,299.00/);
   assert.match(csv, /"Refund".*99.00,-99.00/);
   assert.equal(csv.trim().split('\r\n').length, 3);
   const review = exportReview([doc], range, 'Keep learning', '2026-11-03');
@@ -95,11 +95,11 @@ test('English demo has matching notes and outcomes with stable IDs and equivalen
   const english = makeDemo('Ledger', '2026-11-30');
   assert.deepEqual(english.docs.map(d => d.item.type), ['课程', '书籍', '工具', '创作项目']);
   assert.deepEqual(english.docs.flatMap(d => d.events.filter(e => e.type === 'expense').map(e => e.amount)), [39900, 19900, 9900, 29900]);
-  assert.equal(summarize(english.docs, range).expense, 99600);
-  assert.equal(summarize(english.docs, range).refund, 19900);
+  assert.equal(summarize(english.docs, range).totals[0]!.expense, 99600);
+  assert.equal(summarize(english.docs, range).totals[0]!.refund, 19900);
   assert.equal(Object.keys(english.notes).length, 11);
   assert.deepEqual(english.docs.map(d => [d.item.id, ...d.events.map(e => e.id)]), chinese.docs.map(d => [d.item.id, ...d.events.map(e => e.id)]));
-  assert.equal(summarize(english.docs, range).net, 79700);
+  assert.equal(summarize(english.docs, range).totals[0]!.net, 79700);
   assert.equal(english.docs[0]!.item.name, 'Practical Python course');
   const paths = new Set(Object.keys(english.notes).map(path => `Ledger/演示数据/${path}`));
   for (const doc of english.docs) {

@@ -1,6 +1,16 @@
 import { t } from './i18n';
 import { Attachment, attachmentMarkdown, validateAttachments } from './attachments';
-/** Pure domain rules. Money is always an integer number of fen (CNY). */
+/** Amounts are integer minor units. Missing currency means legacy CNY. */
+export const CURRENCIES = ['CNY', 'USD', 'EUR', 'GBP', 'JPY', 'HKD', 'TWD', 'KRW', 'SGD', 'AUD', 'CAD', 'NZD', 'CHF', 'INR', 'MYR', 'THB', 'KWD', 'BHD'] as const;
+export type Currency = typeof CURRENCIES[number];
+const digitsCache = new Map<Currency, number>();
+export function currencyDigits(currency: Currency): number {
+  if (!CURRENCIES.includes(currency)) throw new LedgerError(t("不支持的币种：{0}", currency));
+  let digits = digitsCache.get(currency);
+  if (digits === undefined) { digits = new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits ?? 2; digitsCache.set(currency, digits); }
+  return digits;
+}
+export function currencyOf(event: Expense | Refund): Currency { return event.currency ?? 'CNY'; }
 export const ITEM_TYPES = ['课程', '书籍', '工具', '创作项目', '其他'] as const;
 export const STATUSES = ['未开始', '进行中', '已完成', '已搁置'] as const;
 export const EVENT_TYPES = ['expense', 'refund', 'learning', 'outcome', 'review'] as const;
@@ -35,8 +45,8 @@ interface EventBase {
   attachments?: Attachment[];
   createdAt: string;
 }
-export interface Expense extends EventBase { type: 'expense'; amount: number }
-export interface Refund extends EventBase { type: 'refund'; amount: number; expenseId: string }
+export interface Expense extends EventBase { type: 'expense'; amount: number; currency?: Currency }
+export interface Refund extends EventBase { type: 'refund'; amount: number; currency?: Currency; expenseId: string }
 export interface Learning extends EventBase { type: 'learning'; content: string; minutes: number | null }
 export interface Outcome extends EventBase { type: 'outcome'; target: string; content: string }
 export interface Review extends EventBase {
@@ -51,7 +61,7 @@ export interface Review extends EventBase {
 export type LedgerEvent = Expense | Refund | Learning | Outcome | Review;
 export interface LedgerDocument {
   ledger: 'learning-investment-ledger';
-  schema: 1;
+  schema: 1 | 2;
   demo: boolean;
   item: Investment;
   events: LedgerEvent[];
@@ -60,13 +70,28 @@ export interface LedgerDocument {
 }
 export interface DateRange { start: string; end: string }
 export interface EventFilter { range: DateRange; type?: EventType | ''; itemId?: string; keyword?: string; newest?: boolean }
-export interface Stats {
-  expense: number; refund: number; net: number;
-  projects: number; outcomes: number; due: number;
-  byType: Record<ItemType, { expense: number; refund: number; net: number }>;
+/** Stored transactions stay numbers; only large, computed totals need bigint. */
+export type MoneyAmount = number | bigint;
+export interface CurrencyTotals {
+  currency: Currency; expense: MoneyAmount; refund: MoneyAmount; net: MoneyAmount;
+  byType: Record<ItemType, { expense: MoneyAmount; refund: MoneyAmount; net: MoneyAmount }>;
+}
+export interface Stats { totals: CurrencyTotals[]; projects: number; outcomes: number; due: number }
+interface ExactTotals {
+  expense: bigint; refund: bigint;
+  byType: Record<ItemType, { expense: bigint; refund: bigint }>;
 }
 
 export class LedgerError extends Error {}
+const MAX_SAFE_MONEY = BigInt(Number.MAX_SAFE_INTEGER);
+function exactMoney(amount: MoneyAmount): bigint {
+  if (typeof amount === 'bigint') return amount;
+  if (!Number.isSafeInteger(amount)) throw new LedgerError(t("金额超出安全整数精度，请检查数据。"));
+  return BigInt(amount);
+}
+function compactMoney(amount: bigint): MoneyAmount {
+  return amount >= -MAX_SAFE_MONEY && amount <= MAX_SAFE_MONEY ? Number(amount) : amount;
+}
 export const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 export const uid = (): string => crypto.randomUUID();
 export function localDate(date = new Date()): string {
@@ -93,20 +118,23 @@ export function last30Range(today = localDate()): DateRange { return { start: ad
 export function validateRange(range: DateRange): void {
   if (!validDate(range.start) || !validDate(range.end) || range.start > range.end) throw new LedgerError(t("请选择有效的起止日期，开始日期不能晚于结束日期。"));
 }
-export function parseMoney(input: string): number {
-  const text = input.trim();
-  if (!/^\d{1,10}(\.\d{1,2})?$/.test(text)) throw new LedgerError(t("金额须大于 0，最多保留两位小数。"));
-  const [whole = '', fraction = ''] = text.split('.');
-  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
-  if (!Number.isSafeInteger(amount) || amount <= 0) throw new LedgerError(t("金额须大于 0，最多保留两位小数。"));
+export function parseMoney(input: string, currency: Currency = 'CNY'): number {
+  const digits = currencyDigits(currency); const value = input.trim();
+  const error = () => new LedgerError(currency === 'CNY' ? t("金额须大于 0，最多保留两位小数。") : t("金额须大于 0，{0} 最多保留 {1} 位小数。", currency, digits));
+  if (!(new RegExp(digits ? `^\\d{1,10}(\\.\\d{1,${digits}})?$` : '^\\d{1,10}$')).test(value)) throw error();
+  const [whole = '', fraction = ''] = value.split('.');
+  const amount = Number(whole) * 10 ** digits + Number(fraction.padEnd(digits, '0'));
+  if (!Number.isSafeInteger(amount) || amount <= 0) throw error();
   return amount;
 }
-export function decimal(amount: number): string {
-  return `${amount < 0 ? '-' : ''}${Math.floor(Math.abs(amount) / 100)}.${String(Math.abs(amount) % 100).padStart(2, '0')}`;
+export function decimal(amount: MoneyAmount, currency: Currency = 'CNY'): string {
+  const units = exactMoney(amount); const absolute = units < 0n ? -units : units;
+  const digits = currencyDigits(currency); const scale = 10n ** BigInt(digits);
+  return `${units < 0n ? '-' : ''}${absolute / scale}${digits ? '.' + String(absolute % scale).padStart(digits, '0') : ''}`;
 }
-export function money(amount: number): string {
-  const [whole = '0', fraction = '00'] = decimal(amount).split('.');
-  return `¥${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction}`;
+export function money(amount: MoneyAmount, currency: Currency = 'CNY'): string {
+  const [whole = '0', fraction] = decimal(amount, currency).split('.');
+  return `${currency === 'CNY' ? '¥' : currency + ' '}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fraction === undefined ? '' : '.' + fraction}`;
 }
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new LedgerError(message); }
 function nonempty(value: unknown, label: string): asserts value is string { assert(typeof value === 'string' && value.trim().length > 0, t("{0}不能为空。", label)); }
@@ -116,14 +144,17 @@ function paths(value: unknown, label: string): asserts value is string[] {
 }
 function optionalDate(value: unknown, label: string): void { assert(value === null || validDate(value), t("{0}无效。", label)); }
 function timestamp(value: unknown, label: string): void { assert(typeof value === 'string' && !Number.isNaN(Date.parse(value)), t("{0}无效。", label)); }
-function positiveAmount(value: unknown): void { assert(typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 999999999999, t("金额必须是大于 0 的整数分，且不超过 99.99 亿元。")); }
+function positiveAmount(value: unknown, currency: Currency): void {
+  const maximum = 10 ** (10 + currencyDigits(currency)) - 1;
+  assert(typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= maximum, t("金额须为有效的正整数最小货币单位。"));
+}
 
 /** Validate untrusted Markdown, including cross-event invariants before it enters the cache. */
 export function validateDocument(input: unknown): asserts input is LedgerDocument {
   assert(input !== null && typeof input === 'object', t("记录不是有效对象。"));
   const doc = input as LedgerDocument;
   assert(doc.ledger === 'learning-investment-ledger', t("不是投入账本文件。"));
-  assert(doc.schema === 1, t("文件版本不受支持，请使用兼容版本的插件。"));
+  assert(doc.schema === 1 || doc.schema === 2, t("文件版本不受支持，请使用兼容版本的插件。"));
   assert(typeof doc.demo === 'boolean', t("演示数据标记无效。"));
   assert(doc.item && typeof doc.item === 'object', t("缺少投入项。"));
   const item = doc.item;
@@ -145,7 +176,11 @@ export function validateDocument(input: unknown): asserts input is LedgerDocumen
     assert(typeof event.time === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(event.time), t("事件时间无效。"));
     nonempty(event.title, t("用途或标题")); paths(event.notes, t("事件笔记")); timestamp(event.createdAt, t("事件创建时间"));
     validateAttachments(event.attachments);
-    if (event.type === 'expense' || event.type === 'refund') positiveAmount(event.amount);
+    if (event.type === 'expense' || event.type === 'refund') {
+      assert(event.currency === undefined || CURRENCIES.includes(event.currency), t("不支持的币种：{0}", event.currency));
+      assert(doc.schema === 2 || currencyOf(event) === 'CNY', t("外币记录需要 schema 2，请使用兼容版本保存。"));
+      positiveAmount(event.amount, currencyOf(event));
+    }
     if (event.type === 'refund') nonempty(event.expenseId, t("原支出"));
     if (event.type === 'learning') {
       nonempty(event.content, t("学习或使用内容"));
@@ -162,8 +197,9 @@ export function validateDocument(input: unknown): asserts input is LedgerDocumen
     const original = doc.events.find((e): e is Expense => e.id === refund.expenseId && e.type === 'expense');
     assert(original, t("退款「{0}」关联的原支出不存在。", refund.title));
     assert(`${refund.date}T${refund.time}` >= `${original.date}T${original.time}`, t("退款发生时间不能早于原支出。"));
-    const total = doc.events.reduce((sum, e) => sum + (e.type === 'refund' && e.expenseId === original.id ? e.amount : 0), 0);
-    assert(total <= original.amount, t("「{0}」累计退款不能超过 {1}。", original.title, money(original.amount)));
+    assert(currencyOf(refund) === currencyOf(original), t("退款币种必须与原支出一致。"));
+    const total = doc.events.reduce((sum, e) => sum + (e.type === 'refund' && e.expenseId === original.id ? exactMoney(e.amount) : 0n), 0n);
+    assert(total <= exactMoney(original.amount), t("「{0}」累计退款不能超过 {1}。", original.title, money(original.amount, currencyOf(original))));
   }
   text(doc.appendix, t("补充笔记"));
 }
@@ -175,13 +211,17 @@ export function baseEvent(itemId: string, title: string, date = localDate()): Om
   return { id: uid(), itemId, title: title.trim(), date, time: localTime(), notes: [], createdAt: new Date().toISOString() };
 }
 export function refunded(doc: LedgerDocument, expenseId: string, excluding = ''): number {
-  return doc.events.reduce((sum, e) => sum + (e.type === 'refund' && e.expenseId === expenseId && e.id !== excluding ? e.amount : 0), 0);
+  const total = compactMoney(doc.events.reduce((sum, e) => sum + (e.type === 'refund' && e.expenseId === expenseId && e.id !== excluding ? exactMoney(e.amount) : 0n), 0n));
+  // A valid refund total cannot exceed its safely stored original payment.
+  if (typeof total !== 'number') throw new LedgerError(t("金额超出安全整数精度，请检查数据。"));
+  return total;
 }
 export function putEvent(doc: LedgerDocument, event: LedgerEvent, suggestedReview?: string | null): LedgerDocument {
   const next = clone(doc);
   const index = next.events.findIndex(e => e.id === event.id);
   const firstExpense = !next.events.some(e => e.type === 'expense');
   if (index < 0) next.events.push(clone(event)); else next.events[index] = clone(event);
+  if ((event.type === 'expense' || event.type === 'refund') && currencyOf(event) !== 'CNY') next.schema = 2;
   if (event.type === 'expense' && firstExpense && !next.item.nextReview) next.item.nextReview = suggestedReview === undefined ? addDays(event.date, 30) : suggestedReview;
   // Editing older history must not overwrite the schedule created by a later review.
   if (event.type === 'review') {
@@ -213,28 +253,42 @@ export function filterEvents(docs: LedgerDocument[], filter: EventFilter): Ledge
   const keyword = filter.keyword?.trim().toLocaleLowerCase() || '';
   const events = docs.flatMap(doc => doc.events.filter(event => {
     if (!inRange(event, filter.range) || (filter.type && event.type !== filter.type) || (filter.itemId && doc.item.id !== filter.itemId)) return false;
-    return !keyword || JSON.stringify([doc.item.name, doc.item.reason, doc.item.type, t(doc.item.type), t(EVENT_LABELS[event.type]), doc.item.project, doc.item.notes, event]).toLocaleLowerCase().includes(keyword);
+    return !keyword || JSON.stringify([doc.item.name, doc.item.reason, doc.item.type, t(doc.item.type), t(EVENT_LABELS[event.type]), doc.item.project, doc.item.notes, event, event.type === 'expense' || event.type === 'refund' ? currencyOf(event) : '']).toLocaleLowerCase().includes(keyword);
   }));
   return events.sort((a, b) => (filter.newest ? -1 : 1) * compareEvents(a, b));
 }
 export function summarize(docs: LedgerDocument[], range: DateRange, today = localDate()): Stats {
-  const result: Stats = { expense: 0, refund: 0, net: 0, projects: 0, outcomes: 0, due: 0, byType: Object.fromEntries(ITEM_TYPES.map(type => [type, { expense: 0, refund: 0, net: 0 }])) as Stats['byType'] };
-  const projects = new Set<string>(); const outcomes = new Set<string>();
+  const balances = new Map<Currency, ExactTotals>();
+  const projects = new Set<string>(); const outcomes = new Set<string>(); let due = 0;
+  const balance = (currency: Currency): ExactTotals => {
+    let value = balances.get(currency);
+    if (!value) { value = { expense: 0n, refund: 0n, byType: Object.fromEntries(ITEM_TYPES.map(type => [type, { expense: 0n, refund: 0n }])) as ExactTotals['byType'] }; balances.set(currency, value); }
+    return value;
+  };
   for (const doc of docs) {
-    if (isDue(doc, today)) result.due++;
+    if (isDue(doc, today)) due++;
     for (const event of doc.events.filter(e => inRange(e, range))) {
       if (doc.item.project) projects.add(doc.item.project);
       if (event.type === 'outcome') outcomes.add(event.target);
       if (event.type === 'expense' || event.type === 'refund') {
-        result[event.type] += event.amount;
-        result.byType[doc.item.type][event.type] += event.amount;
+        const row = balance(currencyOf(event)); const amount = exactMoney(event.amount);
+        row[event.type] += amount; row.byType[doc.item.type][event.type] += amount;
       }
     }
   }
-  result.net = result.expense - result.refund; result.projects = projects.size; result.outcomes = outcomes.size;
-  for (const row of Object.values(result.byType)) row.net = row.expense - row.refund;
-  return result;
+  if (!balances.size) for (const doc of docs) for (const event of doc.events) if (event.type === 'expense' || event.type === 'refund') balance(currencyOf(event));
+  if (!balances.size) balance('CNY');
+  const totals: CurrencyTotals[] = CURRENCIES.flatMap(currency => {
+    const row = balances.get(currency); if (!row) return [];
+    return [{ currency, expense: compactMoney(row.expense), refund: compactMoney(row.refund), net: compactMoney(row.expense - row.refund),
+      byType: Object.fromEntries(ITEM_TYPES.map(type => {
+        const category = row.byType[type];
+        return [type, { expense: compactMoney(category.expense), refund: compactMoney(category.refund), net: compactMoney(category.expense - category.refund) }];
+      })) as CurrencyTotals['byType'] }];
+  });
+  return { totals, projects: projects.size, outcomes: outcomes.size, due };
 }
+export function netAmounts(stats: Stats): string { return stats.totals.map(row => money(row.net, row.currency)).join(' · '); }
 export function renameLinks(doc: LedgerDocument, oldPath: string, newPath: string): LedgerDocument {
   const next = clone(doc);
   const rename = (p: string): string => p === oldPath ? newPath : p.startsWith(`${oldPath}/`) ? newPath + p.slice(oldPath.length) : p;
@@ -252,12 +306,13 @@ function csvCell(value: string): string {
 export function exportCsv(docs: LedgerDocument[], range: DateRange): string {
   validateRange(range);
   const byId = new Map(docs.map(doc => [doc.item.id, doc]));
-  const rows = [[t("记录ID"), t("投入项ID"), t("日期"), t("时间"), t("事件类型"), t("投入项"), t("分类"), t("用途"), t("金额（元）"), t("净支出影响（元）"), t("原支出ID"), t("关联笔记"), t("附件链接"), t("演示数据")].map(csvCell).join(',')];
+  const rows = [[t("记录ID"), t("投入项ID"), t("日期"), t("时间"), t("事件类型"), t("投入项"), t("分类"), t("用途"), t("币种"), t("金额（原币）"), t("净支出影响（原币）"), t("原支出ID"), t("关联笔记"), t("附件链接"), t("演示数据")].map(csvCell).join(',')];
   for (const event of filterEvents(docs, { range })) {
     if (event.type !== 'expense' && event.type !== 'refund') continue;
     const doc = byId.get(event.itemId)!;
-    const fields = [event.id, event.itemId, event.date, event.time, t(EVENT_LABELS[event.type]), doc.item.name, t(doc.item.type), event.title];
-    rows.push([...fields.map(csvCell), decimal(event.amount), decimal(event.type === 'refund' ? -event.amount : event.amount), ...[event.type === 'refund' ? event.expenseId : '', event.notes.join(' | '), (event.attachments || []).map(a => a.target).join(' | '), doc.demo ? t("是") : t("否")].map(csvCell)].join(','));
+    const currency = currencyOf(event);
+    const fields = [event.id, event.itemId, event.date, event.time, t(EVENT_LABELS[event.type]), doc.item.name, t(doc.item.type), event.title, currency];
+    rows.push([...fields.map(csvCell), decimal(event.amount, currency), decimal(event.type === 'refund' ? -event.amount : event.amount, currency), ...[event.type === 'refund' ? event.expenseId : '', event.notes.join(' | '), (event.attachments || []).map(a => a.target).join(' | '), doc.demo ? t("是") : t("否")].map(csvCell)].join(','));
   }
   return '\uFEFF' + rows.join('\r\n') + '\r\n';
 }
@@ -266,10 +321,11 @@ export function exportReview(docs: LedgerDocument[], range: DateRange, evaluatio
   validateRange(range);
   const stats = summarize(docs, range, today);
   const events = filterEvents(docs, { range });
-  const lines = [t("# 投入复盘 · {0} 至 {1}", range.start, range.end), '', t("- 期间净支出：{0}", money(stats.net)), t("- 支出：{0}；退款：{1}", money(stats.expense), money(stats.refund)), t("- 关联项目：{0}；关联成果：{1}", stats.projects, stats.outcomes), '', t("## 主要投入"), '', t("| 投入项 | 类型 | 期间净支出 | 项目与笔记 |"), '| --- | --- | ---: | --- |'];
+  const lines = [t("# 投入复盘 · {0} 至 {1}", range.start, range.end), '', t("按币种分别统计，不进行汇率换算。"), ''];
+  for (const row of stats.totals) lines.push(`### ${row.currency}`, '', t("- 期间净支出：{0}", money(row.net, row.currency)), t("- 支出：{0}；退款：{1}", money(row.expense, row.currency), money(row.refund, row.currency)), '');
+  lines.push(t("- 关联项目：{0}；关联成果：{1}", stats.projects, stats.outcomes), '', t("## 主要投入"), '', t("| 投入项 | 类型 | 币种 | 期间净支出 | 项目与笔记 |"), '| --- | --- | --- | ---: | --- |');
   for (const doc of docs.filter(doc => events.some(e => e.itemId === doc.item.id))) {
-    const net = summarize([doc], range, today).net;
-    lines.push(`| ${doc.item.name.replace(/\|/g, '\\|').replace(/\n/g, ' ')} | ${t(doc.item.type)} | ${money(net)} | ${[doc.item.project, ...doc.item.notes].filter(Boolean).map(wiki).join('、')} |`);
+    for (const row of summarize([doc], range, today).totals) lines.push(`| ${doc.item.name.replace(/\|/g, '\\|').replace(/\n/g, ' ')} | ${t(doc.item.type)} | ${row.currency} | ${money(row.net, row.currency)} | ${[doc.item.project, ...doc.item.notes].filter(Boolean).map(wiki).join('、')} |`);
   }
   lines.push('', t("## 学习与使用"), '');
   const learning = events.filter((e): e is Learning => e.type === 'learning');

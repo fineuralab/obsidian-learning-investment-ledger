@@ -151,6 +151,6 @@ class LedgerSettingsTab extends PluginSettingTab {
       .addButton(btn => btn.setButtonText(t("重建索引")).onClick(async () => { try { await this.plugin.store.load(); new Notice(t("索引已重建")); } catch (error) { new Notice(errorMessage(error), 10000); } }));
     new Setting(containerEl).setName(t("演示账本")).setDesc(t("演示记录与真实记录分别显示和统计，文件存放在数据文件夹的「演示数据」中。"))
       .addButton(btn => btn.setButtonText(t("载入并打开演示")).onClick(async () => { const view = await this.plugin.openLedger(); view?.loadDemo(); }));
-    new Setting(containerEl).setName(t("数据与隐私")).setDesc(t("人民币单币种；所有金额以整数分存储。插件不联网，不采集打开次数或停留时长。卸载插件后，库内 Markdown 文件仍然保留。"));
+    new Setting(containerEl).setName(t("数据与隐私")).setDesc(t("逐笔选择币种，按币种分别汇总，不做汇率换算。旧人民币记录保持人民币；金额以整数最小货币单位保存。插件不联网，卸载后 Markdown 仍保留。"));
   }
 }

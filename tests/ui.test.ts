@@ -26,6 +26,7 @@ class Element extends Target {
   disabled = false;
   inert = false;
   hidden = false;
+  style: Record<string, string> = {};
   private selectedValue = '';
   classList = { add() {}, remove() {}, toggle() {} };
   ownerDocument = document;
@@ -81,11 +82,12 @@ class ItemView {
   registerInterval(id: number): void { this.cleanups.push(() => document.defaultView.clearInterval(id)); }
   unload(): void { for (const cleanup of this.cleanups.splice(0)) cleanup(); }
 }
-interface Draft { amount: string; title: string; itemId: string; notes: string[]; error: string }
+interface Draft { currency: import('../src/domain').Currency; amount: string; title: string; itemId: string; notes: string[]; error: string }
 interface ViewProbe {
   root: Element; draft: Draft; demo: boolean; range: DateRange; quickSaving: boolean; period: string;
   render(): void; renderQuick(): void; renderTimeline(parent: Element): void; resetSelection(): void;
   refresh(): void; onOpen(): Promise<void>; onClose(): Promise<void>; unload(): void;
+  renderStats(): void; renderSummary(parent: Element): void; renderDetails(parent: Element, doc: LedgerDocument): void;
 }
 interface StoreProbe {
   documents: LedgerDocument[]; folder: string;
@@ -146,6 +148,73 @@ function subscription(): LedgerDocument {
 }
 
 for (const locale of ['zh-CN', 'en'] as const) {
+  test(`${locale}: large totals render exactly in statistics, category charts and details`, () => {
+    ui.setLocale(locale); const doc = createDocument('Large KWD totals', '工具'); doc.schema = 2;
+    for (let i = 0; i < 901; i++) doc.events.push({ ...baseEvent(doc.item.id, 'Large payment', '2026-11-01'), type: 'expense', currency: 'KWD', amount: 9_999_999_999_999 });
+    const view = createView(createStore([doc])); view.period = 'custom'; view.range = { start: '2026-11-01', end: '2026-11-30' };
+    view.renderStats();
+    assert.ok(all(view.root).some(node => node.className === 'ill-stat-value' && node.textContent === '9,009,999,999,999.099'));
+    const summary = new Element('div'); view.renderSummary(summary);
+    assert.ok(all(summary).some(node => node.textContent === 'KWD 9,009,999,999,999.099'));
+    const bars = all(summary).filter(node => node.className.startsWith('ill-bar-fill '));
+    assert.deepEqual(bars.map(node => node.style.width), ['0%', '0%', '100%', '0%', '0%']);
+    const details = new Element('div'); view.renderDetails(details, doc);
+    assert.ok(all(details).some(node => node.className === 'ill-detail-amount' && node.textContent === 'KWD 9,009,999,999,999.099'));
+  });
+
+  test(`${locale}: quick entry saves its chosen currency and retains a newer currency during a pending save`, async () => {
+    ui.setLocale(locale); const store = createStore(); let saved: LedgerDocument | undefined; let finish!: () => void;
+    store.save = async doc => { saved = doc; await new Promise<void>(resolve => { finish = resolve; }); };
+    const view = createView(store); const currency = labelled(view.root, '快速记录币种'); currency.value = 'JPY'; currency.dispatch('change');
+    enter(labelled(view.root, '快速记录金额'), '1999'); enter(labelled(view.root, '快速记录用途'), 'Japan book');
+    find(view.root, node => node.tag === 'form').dispatch('submit');
+    currency.value = 'USD'; currency.dispatch('change'); enter(labelled(view.root, '快速记录金额'), '49.99');
+    finish(); await flush(); const event = saved?.events[0]; assert.equal(event?.type, 'expense');
+    if (event?.type !== 'expense') assert.fail('Expense missing');
+    assert.equal(event.currency, 'JPY'); assert.equal(event.amount, 1999); assert.equal(saved!.schema, 2);
+    assert.equal(view.draft.currency, 'USD'); assert.equal(view.draft.amount, '49.99');
+  });
+
+  test(`${locale}: refund currency follows original expense selection and saves original minor units`, async () => {
+    ui.setLocale(locale); let doc = subscription();
+    doc = putEvent(doc, { ...baseEvent(doc.item.id, 'Japanese payment', '2026-10-02'), type: 'expense', currency: 'JPY', amount: 1999 });
+    const japanese = doc.events[2]!; const store = createStore([doc]); let saved: LedgerDocument | undefined;
+    store.save = async value => { saved = value; };
+    new ui.EventModal({ app, store, demo: false }, 'refund', doc).open(); const root = Modal.last!.contentEl;
+    const original = field(root, '原支出 *'); original.value = japanese.id; original.dispatch('change');
+    assert.equal(field(root, '币种 *').value, 'JPY'); assert.equal(field(root, '币种 *').disabled, true);
+    enter(field(root, '用途 *'), 'JPY refund'); enter(field(root, '金额 *'), '999'); enter(field(root, '发生日期 *'), '2026-11-03');
+    find(root, node => node.tag === 'form').dispatch('submit'); await flush();
+    const refund = saved?.events.find(e => e.title === 'JPY refund'); assert.equal(refund?.type, 'refund');
+    if (refund?.type !== 'refund') assert.fail('Refund missing');
+    assert.equal(refund.currency, 'JPY'); assert.equal(refund.amount, 999); assert.equal(refund.expenseId, japanese.id);
+  });
+
+  test(`${locale}: fractional JPY form input fails without losing amount or currency`, async () => {
+    ui.setLocale(locale); const store = createStore([subscription()]); let writes = 0; store.save = async () => { writes++; };
+    new ui.EventModal({ app, store, demo: false }, 'expense', store.documents[0]).open(); const root = Modal.last!.contentEl;
+    const currency = field(root, '币种 *'); currency.value = 'JPY'; currency.dispatch('change');
+    enter(field(root, '用途 *'), 'Invalid fraction'); enter(field(root, '金额 *'), '1.23');
+    find(root, node => node.tag === 'form').dispatch('submit'); await flush();
+    assert.equal(writes, 0); assert.equal(currency.value, 'JPY'); assert.equal(field(root, '金额 *').value, '1.23');
+    assert.ok(all(root).some(node => node.attributes.role === 'alert' && node.textContent.includes('JPY') && !node.hidden));
+  });
+
+  test(`${locale}: totals, category charts and details display separate currencies`, () => {
+    ui.setLocale(locale); let doc = subscription();
+    doc = putEvent(doc, { ...baseEvent(doc.item.id, 'US payment', '2026-11-02'), type: 'expense', currency: 'USD', amount: 4999 });
+    doc = putEvent(doc, { ...baseEvent(doc.item.id, 'Japan payment', '2026-11-02'), type: 'expense', currency: 'JPY', amount: 1999 });
+    const view = createView(createStore([doc])); view.period = 'custom'; view.range = { start: '2026-01-01', end: '2026-12-31' };
+    view.renderStats(); const totals = all(view.root).filter(node => node.className === 'ill-currency-total');
+    assert.deepEqual(totals.map(node => node.attributes['data-currency']), ['CNY', 'USD', 'JPY']);
+    const summary = new Element('div'); view.renderSummary(summary);
+    assert.deepEqual(all(summary).filter(node => node.className === 'ill-breakdown').map(node => node.attributes['data-currency']), ['CNY', 'USD', 'JPY']);
+    const details = new Element('div'); view.renderDetails(details, doc);
+    assert.deepEqual(all(details).filter(node => node.className === 'ill-detail-amount').map(node => node.textContent), ['CNY ¥298.00', 'USD 49.99', 'JPY 1,999']);
+  });
+}
+
+for (const locale of ['zh-CN', 'en'] as const) {
   test(`${locale}: refund from the second expense saves the clicked expense reference`, async () => {
     ui.setLocale(locale);
     let doc = subscription(); const first = doc.events[0]!; const second = doc.events[1]!;
@@ -156,7 +225,7 @@ for (const locale of ['zh-CN', 'en'] as const) {
     find(timeline, node => node.attributes['aria-label'] === ui.t('为{0}退款', second.title)).dispatch('click');
     assert.ok(Modal.last); const form = Modal.last.contentEl;
     assert.equal(field(form, '原支出 *').value, second.id);
-    enter(field(form, '用途 *'), 'Partial refund'); enter(field(form, '金额（元）*'), '49');
+    enter(field(form, '用途 *'), 'Partial refund'); enter(field(form, '金额 *'), '49');
     enter(field(form, '发生日期 *'), '2026-11-03'); enter(field(form, '时间 *'), '12:00');
     find(form, node => node.tag === 'form').dispatch('submit'); await flush();
     assert.ok(saved); const refund = saved.events.find(event => event.title === 'Partial refund');

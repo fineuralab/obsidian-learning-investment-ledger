@@ -1,6 +1,6 @@
 import { getLocale, t } from './i18n';
 import { App, ItemView, Notice, WorkspaceLeaf } from 'obsidian';
-import { addDays, baseEvent, createDocument, DateRange, EVENT_LABELS, EVENT_TYPES, EventType, exportCsv, exportReview, filterEvents, inRange, isDue, ITEM_TYPES, LedgerDocument, LedgerEvent, localDate, money, monthRange, last30Range, parseMoney, putEvent, removeEvent, summarize } from './domain';
+import { CURRENCIES, Currency, currencyOf, Stats, netAmounts, decimal, addDays, baseEvent, createDocument, DateRange, EVENT_LABELS, EVENT_TYPES, EventType, exportCsv, exportReview, filterEvents, inRange, isDue, ITEM_TYPES, LedgerDocument, LedgerEvent, localDate, money, monthRange, last30Range, parseMoney, putEvent, removeEvent, summarize } from './domain';
 import { makeDemo } from './demo';
 import { ConfirmModal, EventModal, EventSeed, FormContext, InvestmentModal, ReviewExportModal } from './forms';
 import { FilePicker } from './files';
@@ -34,7 +34,7 @@ export class LedgerView extends ItemView {
   private detailsOpen = false;
   private dueOnly = false;
   private demo = false;
-  private draft = { amount: '', title: '', itemId: '', notes: [] as string[], error: '' };
+  private draft = { amount: '', title: '', itemId: '', notes: [] as string[], error: '', currency: 'CNY' as Currency };
   private quickSaving = false;
   private unsubscribe?: () => void;
   constructor(leaf: WorkspaceLeaf, private host: ViewHost) { super(leaf); }
@@ -96,7 +96,7 @@ export class LedgerView extends ItemView {
       button(bar, t("清除演示数据"), () => new ConfirmModal(this.app, t("清除演示数据"), t("只将演示投入项和带演示标记的笔记移到库内回收站。你的真实记录会保留。"), async () => { await this.host.store.clearDemo(); this.demo = false; this.resetSelection(); this.render(); }, t("清除演示数据")).open(), 'ill-small');
     }
   }
-  private resetSelection(): void { this.selected = ''; this.selectedEvent = ''; this.itemFilter = ''; this.dueOnly = false; this.draft = { amount: '', title: '', itemId: '', notes: [], error: '' }; }
+  private resetSelection(): void { this.selected = ''; this.selectedEvent = ''; this.itemFilter = ''; this.dueOnly = false; this.draft = { amount: '', title: '', itemId: '', notes: [], error: '', currency: 'CNY' }; }
   private renderIssues(): void {
     if (!this.host.store.issues.length) return;
     const box = el(this.root, 'div', 'ill-issues'); box.setAttribute('role', 'alert');
@@ -110,7 +110,7 @@ export class LedgerView extends ItemView {
   private renderStats(): void {
     const stats = summarize(this.docs, this.range); const strip = el(this.root, 'div', 'ill-stats');
     const entries: [string, string, string, string][] = [
-      [t("期间净支出"), money(stats.net), t("支出 {0} · 退款 {1}", money(stats.expense), money(stats.refund)), 'wallet'],
+      [t("期间净支出"), '', t("按币种分别统计，不进行汇率换算。"), 'wallet'],
       [t("关联项目"), String(stats.projects), t("期间事件涉及的项目笔记"), 'folder-open'],
       [t("关联成果"), String(stats.outcomes), t("按成果文件去重"), 'sprout'],
       [t("到期待回访"), String(stats.due), t("截至今天，全部未完成投入项"), 'calendar-clock'],
@@ -119,7 +119,16 @@ export class LedgerView extends ItemView {
       const [label, value, hint, symbol] = entries[index]!;
       const stat = el(strip, index === 3 ? 'button' : 'div', `ill-stat ${index === 3 && stats.due ? 'ill-due-stat' : ''}`);
       const line = el(stat, 'div', 'ill-stat-label'); el(line, 'span', '', label); icon(line, symbol);
-      el(stat, 'strong', 'ill-stat-value', value); el(stat, 'span', 'ill-stat-hint', hint);
+      if (index === 0) {
+        const balances = el(stat, 'div', `ill-currency-balances${stats.totals.length > 1 ? ' is-multi' : ''}`);
+        for (const row of stats.totals) {
+          const total = el(balances, 'div', 'ill-currency-total'); total.setAttribute('data-currency', row.currency);
+          el(total, 'span', 'ill-currency-code', row.currency);
+          el(total, 'strong', 'ill-stat-value', money(row.net, row.currency).replace(`${row.currency} `, ''));
+          el(total, 'span', 'ill-stat-hint', t("支出 {0} · 退款 {1}", money(row.expense, row.currency), money(row.refund, row.currency)));
+        }
+      } else el(stat, 'strong', 'ill-stat-value', value);
+      el(stat, 'span', 'ill-stat-hint', hint);
       if (index === 3) { stat.setAttribute('aria-label', t("查看到期待回访")); stat.addEventListener('click', () => { this.tab = 'items'; this.dueOnly = true; this.itemFilter = ''; this.keyword = ''; this.render(); }); }
     }
   }
@@ -135,8 +144,10 @@ export class LedgerView extends ItemView {
   private renderQuick(): void {
     const quick = el(this.root, 'form', 'ill-quick');
     const intro = el(quick, 'div', 'ill-quick-label'); icon(intro, 'zap'); el(intro, 'span', '', t("快速记一笔"));
-    const amountWrap = el(quick, 'div', 'ill-quick-amount'); el(amountWrap, 'span', '', '¥');
-    const amount = el(amountWrap, 'input'); amount.type = 'text'; amount.inputMode = 'decimal'; amount.placeholder = '0.00'; amount.value = this.draft.amount; amount.required = true; amount.setAttribute('aria-label', t("快速记录金额"));
+    const currency = el(quick, 'select', 'ill-quick-currency'); currency.setAttribute('aria-label', t("快速记录币种")); fillOptions(currency, CURRENCIES, this.draft.currency);
+    currency.addEventListener('change', () => { this.draft = { ...this.draft, currency: currency.value as Currency }; amount.placeholder = decimal(0, this.draft.currency); });
+    const amountWrap = el(quick, 'div', 'ill-quick-amount');
+    const amount = el(amountWrap, 'input'); amount.type = 'text'; amount.inputMode = 'decimal'; amount.placeholder = decimal(0, this.draft.currency); amount.value = this.draft.amount; amount.required = true; amount.setAttribute('aria-label', t("快速记录金额"));
     amount.addEventListener('input', () => { this.draft = { ...this.draft, amount: amount.value }; });
     const title = el(quick, 'input', 'ill-quick-title'); title.type = 'text'; title.placeholder = t("这次投入是为了什么？"); title.value = this.draft.title; title.required = true; title.setAttribute('aria-label', t("快速记录用途"));
     title.addEventListener('input', () => { this.draft = { ...this.draft, title: title.value }; });
@@ -151,11 +162,11 @@ export class LedgerView extends ItemView {
         const current = snapshot.itemId ? this.host.store.get(snapshot.itemId) : undefined;
         if (snapshot.itemId && !current) throw new Error(t("投入项已不存在，请重新选择。"));
         const doc = current || createDocument(snapshot.title, '其他', snapshot.demo);
-        const expense = { ...baseEvent(doc.item.id, snapshot.title), type: 'expense' as const, amount: parseMoney(snapshot.amount), notes: snapshot.notes };
+        const expense = { ...baseEvent(doc.item.id, snapshot.title), type: 'expense' as const, amount: parseMoney(snapshot.amount, snapshot.currency), currency: snapshot.currency, notes: snapshot.notes };
         await this.host.store.save(putEvent(doc, expense), current);
         // Edits and ledger switches replace the draft while the write is pending.
         if (this.draft === submitted) {
-          this.selected = doc.item.id; this.draft = { amount: '', title: '', itemId: snapshot.itemId, notes: [], error: '' };
+          this.selected = doc.item.id; this.draft = { amount: '', title: '', itemId: snapshot.itemId, notes: [], error: '', currency: snapshot.currency };
         }
         new Notice(t("已保存，可在投入详情中补充购买原因和类型。"));
       })().catch(error => {
@@ -224,7 +235,7 @@ export class LedgerView extends ItemView {
       card.addEventListener('click', () => this.choose(doc, event)); card.addEventListener('keydown', key => { if (key.target === card && (key.key === 'Enter' || key.key === ' ')) { key.preventDefault(); this.choose(doc, event); } });
       const top = el(card, 'div', 'ill-event-top');
       const tags = el(top, 'div', 'ill-inline'); el(tags, 'span', `ill-event-tag ill-kind-${event.type}`, t(EVENT_LABELS[event.type])); el(tags, 'span', 'ill-event-item', doc.item.name); el(tags, 'span', 'ill-event-time', event.time);
-      if (event.type === 'expense' || event.type === 'refund') el(top, 'strong', `ill-event-money ${event.type === 'refund' ? 'ill-refund' : ''}`, `${event.type === 'refund' ? '+' : '−'}${money(event.amount)}`);
+      if (event.type === 'expense' || event.type === 'refund') el(top, 'strong', `ill-event-money ${event.type === 'refund' ? 'ill-refund' : ''}`, `${event.type === 'refund' ? '+' : '−'}${money(event.amount, currencyOf(event))}`);
       el(card, 'h3', '', event.title);
       if (event.type === 'learning') el(card, 'p', 'ill-event-description', event.content);
       if (event.type === 'outcome') el(card, 'p', 'ill-event-description', event.content || t("已确认的成果"));
@@ -251,7 +262,7 @@ export class LedgerView extends ItemView {
   }
   private deleteEvent(doc: LedgerDocument, event: LedgerEvent): void {
     const unlink = event.type === 'outcome';
-    new ConfirmModal(this.app, unlink ? t("解除成果关联") : t("删除{0}", t(EVENT_LABELS[event.type])), unlink ? t("解除「{0}」与此投入项的关联，成果文件会保留。", event.title) : t("删除「{0}」{1}后，统计会重新计算。", event.title, event.type === 'expense' || event.type === 'refund' ? `（${money(event.amount)}）` : ''), async () => { await this.host.store.save(removeEvent(doc, event.id), doc); }, unlink ? t("解除关联") : t("确认删除")).open();
+    new ConfirmModal(this.app, unlink ? t("解除成果关联") : t("删除{0}", t(EVENT_LABELS[event.type])), unlink ? t("解除「{0}」与此投入项的关联，成果文件会保留。", event.title) : t("删除「{0}」{1}后，统计会重新计算。", event.title, event.type === 'expense' || event.type === 'refund' ? `（${money(event.amount, currencyOf(event))}）` : ''), async () => { await this.host.store.save(removeEvent(doc, event.id), doc); }, unlink ? t("解除关联") : t("确认删除")).open();
   }
   private renderItems(parent: HTMLElement): void {
     const docs = this.docs.filter(doc => (!this.dueOnly || isDue(doc)) && (!this.keyword || JSON.stringify([doc.item, t(doc.item.type), t(doc.item.status)]).toLocaleLowerCase().includes(this.keyword.toLocaleLowerCase())));
@@ -261,24 +272,31 @@ export class LedgerView extends ItemView {
       const card = el(parent, 'article', `ill-item-card ${this.selected === doc.item.id ? 'is-selected' : ''}`); card.tabIndex = 0; card.setAttribute('role', 'button'); card.setAttribute('aria-label', t("查看{0}", doc.item.name)); card.addEventListener('click', () => this.choose(doc)); card.addEventListener('keydown', e => { if (e.target === card && e.key === 'Enter') this.choose(doc); });
       const top = el(card, 'div', 'ill-section-head'); el(top, 'span', 'ill-type-label', t(doc.item.type)); el(top, 'span', isDue(doc) ? 'ill-review-due' : 'ill-muted', isDue(doc) ? t("待回访 · {0}", doc.item.nextReview) : t(doc.item.status));
       el(card, 'h3', '', doc.item.name); el(card, 'p', 'ill-muted', doc.item.reason || t("还没有填写购买原因。"));
-      const bottom = el(card, 'div', 'ill-section-head'); el(bottom, 'strong', '', money(summarize([doc], { start: '0001-01-01', end: '9999-12-31' }).net)); el(bottom, 'span', 'ill-muted', t("{0} 条记录", doc.events.length));
+      const bottom = el(card, 'div', 'ill-section-head'); el(bottom, 'strong', '', netAmounts(summarize([doc], { start: '0001-01-01', end: '9999-12-31' }))); el(bottom, 'span', 'ill-muted', t("{0} 条记录", doc.events.length));
     }
   }
   private renderSummary(parent: HTMLElement): void {
     const docs = this.docs.filter(doc => (!this.itemFilter || doc.item.id === this.itemFilter) && (!this.keyword || JSON.stringify([doc, t(doc.item.type), t(doc.item.status)]).toLocaleLowerCase().includes(this.keyword.toLocaleLowerCase())));
     const stats = summarize(docs, this.range);
     const heading = el(parent, 'div', 'ill-section-head'); el(heading, 'h2', '', t("这段时间，投入去了哪里")); el(heading, 'span', 'ill-muted', `${this.range.start} — ${this.range.end}`);
-    const chart = el(parent, 'div', 'ill-breakdown'); const max = Math.max(...Object.values(stats.byType).map(row => row.expense), 1);
-    for (const type of ITEM_TYPES) {
-      const row = el(chart, 'div', 'ill-breakdown-row'); el(row, 'span', '', t(type)); const bar = el(row, 'div', 'ill-bar-track'); const fill = el(bar, 'span', `ill-bar-fill ill-bar-${ITEM_TYPES.indexOf(type)}`); fill.style.width = `${stats.byType[type].expense / max * 100}%`;
-      const amount = el(row, 'div', 'ill-breakdown-amount'); el(amount, 'strong', '', money(stats.byType[type].net)); if (stats.byType[type].refund) el(amount, 'small', '', t("含退款 {0}", money(stats.byType[type].refund)));
+    el(parent, 'p', 'ill-hint', t("按币种分别统计，不进行汇率换算。"));
+    for (const balance of stats.totals) {
+      const chart = el(parent, 'div', 'ill-breakdown'); chart.setAttribute('data-currency', balance.currency);
+      el(chart, 'h3', '', balance.currency);
+      const max = Object.values(balance.byType).reduce((largest, row) => BigInt(row.expense) > largest ? BigInt(row.expense) : largest, 1n);
+      for (const type of ITEM_TYPES) {
+        const row = el(chart, 'div', 'ill-breakdown-row'); el(row, 'span', '', t(type)); const bar = el(row, 'div', 'ill-bar-track'); const fill = el(bar, 'span', `ill-bar-fill ill-bar-${ITEM_TYPES.indexOf(type)}`);
+        // Only the bounded visual percentage becomes a Number; amounts stay exact.
+        fill.style.width = `${Number(BigInt(balance.byType[type].expense) * 100_000n / max) / 1000}%`;
+        const amount = el(row, 'div', 'ill-breakdown-amount'); el(amount, 'strong', '', money(balance.byType[type].net, balance.currency)); if (balance.byType[type].refund) el(amount, 'small', '', t("含退款 {0}", money(balance.byType[type].refund, balance.currency)));
+      }
+      el(chart, 'p', 'ill-hint', t("条形长度表示支出总额；右侧金额为扣除期间退款后的净支出。"));
     }
-    el(chart, 'p', 'ill-hint', t("条形长度表示支出总额；右侧金额为扣除期间退款后的净支出。"));
     for (const type of ITEM_TYPES) {
       const group = docs.filter(doc => doc.item.type === type && doc.events.some(e => inRange(e, this.range))); if (!group.length) continue;
       el(parent, 'h3', 'ill-summary-type', t(type));
       for (const doc of group) {
-        const section = el(parent, 'section', 'ill-summary-item'); const top = el(section, 'div', 'ill-section-head'); button(top, doc.item.name, () => this.choose(doc), 'ill-text'); el(top, 'strong', '', money(summarize([doc], this.range).net));
+        const section = el(parent, 'section', 'ill-summary-item'); const top = el(section, 'div', 'ill-section-head'); button(top, doc.item.name, () => this.choose(doc), 'ill-text'); el(top, 'strong', '', netAmounts(summarize([doc], this.range)));
         const entries = doc.events.filter(e => inRange(e, this.range));
         el(section, 'p', 'ill-muted', t("{0} 次学习 / 使用 · {1} 项成果关联", entries.filter(e => e.type === 'learning').length, entries.filter(e => e.type === 'outcome').length));
         for (const event of entries.filter(e => e.type === 'learning' || e.type === 'outcome')) {
@@ -298,7 +316,8 @@ export class LedgerView extends ItemView {
     const tags = el(parent, 'div', 'ill-detail-tags'); el(tags, 'span', 'ill-type-label', t(doc.item.type)); el(tags, 'span', 'ill-status', t(doc.item.status)); if (doc.demo) el(tags, 'span', 'ill-status', t("演示"));
     el(parent, 'h2', 'ill-detail-title', doc.item.name);
     const total = summarize([doc], { start: '0001-01-01', end: '9999-12-31' });
-    el(parent, 'div', 'ill-detail-amount', money(total.net)); el(parent, 'p', 'ill-hint', t("累计净投入 · {0} 笔支出{1}", doc.events.filter(e => e.type === 'expense').length, total.refund ? t(" · 已退 {0}", money(total.refund)) : ''));
+    for (const row of total.totals) el(parent, 'div', 'ill-detail-amount', `${row.currency === 'CNY' ? 'CNY ' : ''}${money(row.net, row.currency)}`);
+    el(parent, 'p', 'ill-hint', t("累计净投入 · {0} 笔支出{1}", doc.events.filter(e => e.type === 'expense').length, total.totals.some(row => row.refund) ? t(" · 已退 {0}", total.totals.filter(row => row.refund).map(row => money(row.refund, row.currency)).join(' · ')) : ''));
     button(parent, t("编辑投入项"), () => new InvestmentModal(this.context(), doc).open(), 'ill-small', 'pencil');
     const reason = this.detailSection(parent, t("最初为什么投入")); el(reason, 'p', '', doc.item.reason || t("补充购买原因，给下次回访留一个参照。"));
     const actions = el(parent, 'div', 'ill-detail-actions');

@@ -37,7 +37,7 @@ events:
 
 Dates and ISO timestamps are read as strings. `nextReview` is a date or `null`, never an empty string. IDs are globally unique: new records use UUIDs and demo records have stable `demo-` IDs. Renaming an investment or its source file does not change its ID. Duplicated IDs are reported and writes to conflicting files are blocked.
 
-Common event fields are `id`, `itemId`, `type`, `date`, `time`, `title`, `notes` and `createdAt`. Events sort by date and time, then creation timestamp and ID. Financial amounts must be positive integer fen (one hundredth of a CNY).
+Common event fields are `id`, `itemId`, `type`, `date`, `time`, `title`, `notes` and `createdAt`. Events sort by date and time, then creation timestamp and ID. Legacy financial amounts are positive integer fen (one hundredth of a CNY); see the 0.4.0 currency extension below.
 
 | Event type | Additional fields |
 | --- | --- |
@@ -88,3 +88,13 @@ attachments:
 Attachment IDs are unique within their list. `kind` is `file` or `url`; `target` is required and `label` is optional. File targets must be safe vault-relative paths. URLs must be HTTP or HTTPS without embedded login credentials. Saving a link makes no network request.
 
 Binary files stay separately in the vault, rather than being encoded as base64 in Markdown. Imported names receive UUID prefixes to avoid overwrites. The readable body uses `![[path]]` for supported images and `[[path]]` for other files. Attachments do not contribute to confirmed outcome statistics.
+
+## 0.4.0 per-transaction currencies
+
+Expenses and refunds may include `currency`, an ISO currency code. An absent field always means CNY. `amount` is an integer in that currency's minor units: USD 19.99 is `amount: 1999, currency: USD`; JPY 1999 is `amount: 1999, currency: JPY`; KWD 1.234 is `amount: 1234, currency: KWD`. No exchange-rate conversion occurs.
+
+Legacy CNY-only files retain schema 1 and may omit currency. Adding the first foreign-currency event upgrades that one document to schema 2 without changing its legacy events or amounts. Plugin 0.4.0 reads both schemas; older plugins reject schema 2 rather than assuming its amounts are CNY. Schema 1 rejects explicit non-CNY currencies. Unknown currencies, mismatched refund currencies and excessive decimal precision are rejected.
+
+Refunds must match the original payment currency; payments with refunds cannot change currency alone. Totals and categories are calculated independently for each currency. CSV includes currency codes; Markdown reviews have separate currency sections.
+
+Computed aggregates use exact integer arithmetic. Totals within the safe integer range remain numbers; larger totals use in-memory BigInt values and are formatted directly as decimal text. BigInt totals are never serialized into ledger YAML. Stored transaction amounts and schemas are unchanged; chart percentages alone use bounded numeric values.

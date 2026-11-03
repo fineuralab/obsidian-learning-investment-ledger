@@ -1,5 +1,13 @@
 # Verification
 
+## 0.4.0 currency regressions
+
+76 functional/UI tests and 9 release-boundary tests cover per-transaction currencies, separated totals and category charts, original-currency refunds and caps, 0/2/3 decimal precision, legacy CNY reads without writes, schema-2 restart recovery, bilingual form/quick-entry behavior, CSV and Markdown exports. Historical native checks below describe the earlier releases.
+
+Large-total regressions reproduce 901 and 1000 valid maximum KWD payments; verify the safe-integer boundary, exact one-unit net after large refunds, negative cross-period refunds, independent categories/currencies, formatting and bilingual chart/detail rendering. Numeric amounts remain unchanged in the Markdown source and CSV rows. A disposable native Obsidian check also loaded 901 maximum KWD payments and confirmed KWD 9,009,999,999,999.099 in totals, category charts and Markdown. The actual CSV (902 transactions including one legacy CNY record) matched independent decimal summation; both source records remained byte-identical.
+
+Native Obsidian 1.14.5 checks in a disposable vault confirmed English and Chinese currency totals, separate category charts, locked original-currency refunds and rejected fractional JPY input with preserved form values. Native CSV export (six transactions, fifteen columns) and Markdown review were read back and matched CNY 498.00, USD 40.00, JPY 1999 and KWD 1.234. The legacy CNY source stayed byte-identical. Original test-vault settings were restored afterward.
+
 **English** · [简体中文](verification.zh-CN.md)
 
 Current version: **0.3.0**. The 0.1 and 0.2 native-app checks below are historical baselines, not a claim that every older browser automation script has been translated.
